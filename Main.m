@@ -1,4 +1,4 @@
-addpath('func')
+addpath('function')
 addpath('Illumination')
 
 %% Input parameters
@@ -29,6 +29,9 @@ else
     [kx,ky] = meshgrid(-dk*N/2:dk:dk*N/2-dk,-dk*N/2:dk:dk*N/2-dk);
 end
 
+kr=sqrt(kx.^2+ky.^2);
+pupil = (kr<1);
+
 %% load 2D PSF and OTF
 load("PSF.mat")
 figure;imagesc(psf2D);colorbar;title('PSF 2D');
@@ -41,16 +44,11 @@ th = atan2(ky, kx);
 W40 = 0.0 ;    
 W31 = 0.0 ;   
 W22 = 0.0 ;   
-
 rho = kr / max(kr(kr <= 1)); 
 
-
 phi_sph = 2*pi * W40 .* (6*rho.^4 - 6*rho.^2 + 1);
-
 phi_coma = 2*pi * W31 .* (3*rho.^3 - 2*rho) .* cos(th);
-
 phi_ast = 2*pi * W22 .* rho.^2 .* cos(2*th);
-
 
 phi_total = phi_sph + phi_coma + phi_ast;
 
@@ -142,7 +140,7 @@ Xiter=0;
 tic;
 t=0;
 for i=1:nums
-    [temp4,Xiter] = fista_lasso(Y(:,:,i), D, [], opts);
+    [temp4,Xiter] = fista_lasso2(Y(:,:,i), D, [], opts);
     temp5(:,:,i)=abs(temp4);
     t=t+1;
 end

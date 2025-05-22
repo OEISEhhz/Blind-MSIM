@@ -18,262 +18,105 @@ lambda=0.488;   % Wavelength in um
 load("PSF.mat")
 figure;imagesc(psf2D);colorbar;title('PSF 2D');
 otf2D = abs(fftn(psf2D,[N N]));
-figure;imagesc(otf2D);colorbar;title('OTF 2D');
+% figure;imagesc(otf2D);colorbar;title('OTF 2D');
 
 
-% load original illumination patterns 
-%-----------------------------------------------------
-load("Original illumination.mat")
-P1 = P3;
+% Load illumination patterns
+load("Original illumination.mat"); 
+Illumination{1} = P3; illum_names{1} = 'Original illumination';
+load("illumination with SA.mat");  
+Illumination{2} = P1_distorted; illum_names{2} = 'illumination with SA';
+load("illumination with Astig.mat"); 
+Illumination{3} = P1_distorted; illum_names{3} = 'illumination with Astig';
 
-% load distorted illumination patterns 
-%-----------------------------------------------------
-load("illumination with SA.mat") % load illumination with different aberration
-
-figure(); imagesc(P1(:,:,5)); axis square; axis off; colormap gray; title('pattern');
-figure(); imagesc(P1_distorted(:,:,5)); axis square; axis off; colormap gray; title('pattern-distorted');
-
-%% Generate sample
+% Generate sample
+disp("Loading sample...")
 load("obj.mat")
 Sample = densite;
 
-P3 = P1;
-P1 = P1_distorted;
+% Reconstruction parameters
+SNR_dB = 30;% noise parameters
+alpha = 1e-3;% Wiener parameters
 
-D1 = zeros(N,N,K,'single');
-
-disp('Generating raw data 1...')
-
-for i = 1:K
-    D1(:,:,i) = ifft2(fft2(P1(:,:,i).*Sample).*otf2D);
-    D1(:,:,i) = abs(D1(:,:,i));
-end
-
-SNR_dB = 30;
-
-signal_power = mean(D1(:).^2);
-snr_linear = 10^(SNR_dB/10); 
-noise_power = signal_power / snr_linear;
-
-
-for i = 1:K
-    noise = sqrt(noise_power) * randn(N, N); 
-    D1(:,:,i) = D1(:,:,i) + noise; 
-end
-
-D1 = D1./max(D1(:));
-wf_down = mean(D1,3);
-figure(); imagesc(mean(D1,3)); axis square; axis off; colormap gray; title('Widefield 2 zoom');
-
-
-%% calculate output
-
-img = D1;
-measureWD = wf_down;
-figure;imagesc(img(:,:,1));colorbar;colormap gray;
-title('wide field measurement')
-
-
-%% Wiener deconvolution of widefield image
-alpha = 1e-3;
-wienerWD = real( ifft2(conj(otf2D).*fft2(measureWD)./(otf2D.*conj(otf2D)+alpha )));
-figure;imagesc(wienerWD);title('Wiener filter of wd image');axis square;colormap gray;
- 
- %% FISTA Filter
- disp('Blind MSIM deconvolution...');
-Y = img;
-D = psf2D;
-
-opts.pos = true;opts.lambda = 0.01;
+% fista parameters
+opts.pos = true;
+opts.lambda = 0.01;
 opts.beta = 0.005;
 opts.backtracking = false;
-nums=224;
-temp4_1=zeros(N);
-temp5 = zeros(N,N,224);
-Xiter=0;
+nums = K;
 
-tic;
-t=0;
-for i=1:nums
-    [temp4,Xiter] = fista_lasso2(Y(:,:,i), D, [], opts);
-    temp5(:,:,i)=abs(temp4);
-    t=t+1;
-end
-times=toc;
-times
-temp4=sum(temp5,3)/nums;
-temp6=zeros(N);
-recon2=temp6;
-for j=1:nums
-    temp6 = (temp5(:,:,j) - temp4).^2;
-    recon2 = recon2+temp6;
-end
-recon2=recon2./nums;
-recon2=sqrt(recon2);
+for idx = 1:length(Illumination)
+    disp(['Processing: ' illum_names{idx}]);
 
-figure;imagesc(temp4); axis square; colormap gray; title('temp4');
+    P = Illumination{idx};  % use different Illumination
+    
+    D1 = zeros(N,N,K);
+    for i = 1:K
+        D1(:,:,i) = ifft2(fft2(P(:,:,i).*Sample).*otf2D);
+        D1(:,:,i) = abs(D1(:,:,i));
+    end
+    signal_power = mean(D1(:).^2);
+    snr_linear = 10^(SNR_dB/10); 
+    noise_power = signal_power / snr_linear;
+    for i = 1:K
+        noise = sqrt(noise_power) * randn(N, N); 
+        D1(:,:,i) = D1(:,:,i) + noise; 
+    end
+    D1 = D1 ./ max(D1(:));
+    measureWD = mean(D1,3);
+
+    % Wiener
+    wienerWD = real(ifft2(conj(otf2D) .* fft2(measureWD) ./ (abs(otf2D).^2 + alpha)));
+
+    % blind
+    disp('Blind MSIM deconvolution...')
+    Y = D1;
+    D = psf2D;
+    temp5 = zeros(N,N,nums);
+    for i = 1:nums
+        [temp4, ~] = fista_lasso2(Y(:,:,i), D, [], opts);
+        temp5(:,:,i) = abs(temp4);
+    end
+    temp4_mean = sum(temp5,3) / nums;
+    recon2 = zeros(N);
+    for j = 1:nums
+        recon2 = recon2 + (temp5(:,:,j) - temp4_mean).^2;
+    end
+    recon2 = sqrt(recon2 ./ nums);
+
+%     results(idx).name = illum_names{idx};        
+%     results(idx).wienerWD = wienerWD;             % Wiener
+    results(idx).recon2 = recon2;                 % FISTA
+end
+
+
 
 
 %% plot and save      
+figure;
+pattern1 = subplot(1,3,1);
+imagesc(Illumination{1}(:,:,5));colormap gray; axis square;title('Original')
+pattern2 = subplot(1,3,2);
+imagesc(Illumination{2}(:,:,5));colormap gray; axis square;title('SA')
+pattern3 = subplot(1,3,3);
+imagesc(Illumination{3}(:,:,5));colormap gray; axis square;title('Astig')
 
-temp = lambda/dx;    
-R2 = 5/(NA*pi);
-r = 60/temp;
-Axisx2 = 1/temp:(1/temp):(60/temp); 
-Axisy2 = Axisx2;
-
-SNR = SNR_dB;
-
-folderPath = sprintf('Result_simulator/Aberration/SphericalAberration_obj/NA=%.2f', NA);
-
-if ~exist(folderPath, 'dir')
-    mkdir(folderPath);
-end
-
-filename = fullfile(folderPath, sprintf('Original illumination.mat'));
-save(filename, 'P3');
-figure;imagesc(P3(:,:,5));colormap gray; axis square;
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off';
-filename = fullfile(folderPath, sprintf('Original_illumination_SNR%d.tif', SNR));
-saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('Original_illumination_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
+set([pattern1 pattern2 pattern3], 'XColor', 'none', 'YColor', 'none');
 
 
-filename = fullfile(folderPath, sprintf('illumination with SA.mat'));
-save(filename, 'P1_distorted');
-figure;imagesc(P1_distorted(:,:,5));colormap gray; axis square;
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off';
-filename = fullfile(folderPath, sprintf('Distorted_illumination_SNR%d.tif', SNR));
-saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('Distorted_illumination_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
+figure;
+a1 = subplot(2,3,1);
+imagesc(Sample);colormap gray; axis square;title("Ground truth")
+a2 = subplot(2,3,2);
+imagesc(measureWD);colormap gray; axis square;title("Wide-field")
+a3 = subplot(2,3,3);
+imagesc(wienerWD);colormap gray;axis square;title("wiener")
+a4 = subplot(2,3,4);
+imagesc(results(1).recon2);colormap gray;axis square;title("proposed-Original")
+a5 = subplot(2,3,5);
+imagesc(results(2).recon2);colormap gray;axis square;title("proposed-SA")
+a6 = subplot(2,3,6);
+imagesc(results(3).recon2);colormap gray;axis square;title("proposed-Astig")
 
+set([a1 a2 a3 a4 a5 a6], 'XColor', 'none', 'YColor', 'none');
 
-filename = fullfile(folderPath, sprintf('Sample_SNR%d.mat', SNR));
-save(filename, 'Sample');
-figure;imagesc(Sample);colormap gray; axis square;
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off';
-filename = fullfile(folderPath, sprintf('Sample_SNR%d.tif', SNR));
-saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('Sample_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-filename = fullfile(folderPath, sprintf('wf_SNR%d.mat', SNR));
-save(filename, 'measureWD');
-figure;imagesc(measureWD);colormap gray; axis square;
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off';
-filename = fullfile(folderPath, sprintf('wf_SNR%d.tif', SNR));
-saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('wf_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-filename = fullfile(folderPath, sprintf('wiener_SNR%d.mat', SNR));
-save(filename, 'wienerWD');
-figure;imagesc(wienerWD);colormap gray;axis square;
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off';
-filename = fullfile(folderPath, sprintf('wiener_SNR%d.tif', SNR));
-saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('wiener_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-
-filename = fullfile(folderPath, sprintf('FISTA_SNR%d.mat', SNR));
-save(filename, 'recon2');
-figure;imagesc(recon2);colormap gray;axis square;
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off';
-filename = fullfile(folderPath, sprintf('fista_SNR%d.tif', SNR));
-saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('fista.eps'));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-
-%% show part of results
-
-
-folderPath = sprintf('Result_simulator/Aberration/SphericalAberration_obj/NA=%.2f/Northwest', NA);
-
-if ~exist(folderPath, 'dir')
-    mkdir(folderPath);
-end
-
-figure;imagesc(Axisx2,Axisy2,Sample(41:100,41:100));colormap gray; axis square;
- h1 = rectangle('Position',[r-R2 r-R2 2*R2 2*R2],'Curvature',[1 1],'EdgeColor','y','LineWidth',2);
- h2 = rectangle('Position', [r-2*R2, r-2*R2, 4*R2, 4*R2], 'Curvature', [1 1], 'EdgeColor', 'g', 'LineWidth', 2);
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off'; 
- filename = fullfile(folderPath, sprintf('raw_SNR%d.tif', SNR));
- saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('raw_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-
-
-figure;imagesc(Axisx2,Axisy2,measureWD(41:100,41:100));colormap gray; axis square;
- h1 = rectangle('Position',[r-R2 r-R2 2*R2 2*R2],'Curvature',[1 1],'EdgeColor','y','LineWidth',2);
- h2 = rectangle('Position', [r-2*R2, r-2*R2, 4*R2, 4*R2], 'Curvature', [1 1], 'EdgeColor', 'g', 'LineWidth', 2);
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off'; 
- filename = fullfile(folderPath, sprintf('wf_SNR%d.tif', SNR));
- saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('wf_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-
-figure;imagesc(Axisx2,Axisy2,wienerWD(41:100,41:100));colormap gray;axis square;
- h1 = rectangle('Position',[r-R2 r-R2 2*R2 2*R2],'Curvature',[1 1],'EdgeColor','y','LineWidth',2);
- h2 = rectangle('Position', [r-2*R2, r-2*R2, 4*R2, 4*R2], 'Curvature', [1 1], 'EdgeColor', 'g', 'LineWidth', 2);
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off'; 
- filename = fullfile(folderPath, sprintf('wiener_SNR%d.tif', SNR));
- saveas(gcf,filename);
- fname = fullfile(folderPath, sprintf('wiener_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);
-
-
-
-figure;imagesc(Axisx2,Axisy2,recon2(41:100,41:100));colormap gray;axis square;
- h1 = rectangle('Position',[r-R2 r-R2 2*R2 2*R2],'Curvature',[1 1],'EdgeColor','y','LineWidth',2);
- h2 = rectangle('Position', [r-2*R2, r-2*R2, 4*R2, 4*R2], 'Curvature', [1 1], 'EdgeColor', 'g', 'LineWidth', 2);
-ax=gca;
-ax.XAxis.Visible='off';
-ax.YAxis.Visible='off';
-ax.ZAxis.Visible='off'; 
- filename = fullfile(folderPath, sprintf('fista_SNR%d.tif', SNR));
- saveas(gcf,filename); 
- fname = fullfile(folderPath, sprintf('fista_SNR%d.eps', SNR));
- print(gcf,'-depsc', fname);
-     unix(['epstopdf ', fname]);

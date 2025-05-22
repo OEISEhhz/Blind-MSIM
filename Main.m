@@ -1,4 +1,4 @@
-addpath('function')
+addpath('func')
 addpath('Illumination')
 
 %% Input parameters
@@ -13,65 +13,20 @@ dx=pixelsize/magnification;     % Sampling in lateral plane at the sample in um
 NA=1.45;         
 lambda=0.488;   % Wavelength in um
 
-axial=true;     
-NyquistSampling =0;
-res = lambda/(2*NA);       
-if(NyquistSampling)
-    dxn = lambda/(4*NA);          
-    Nn = ceil(N*dx/dxn/2)*2;      
-    dxn = N*dx/Nn;                
-    oversampling = res/dxn;       
-    dk=oversampling/(Nn/2);       
-    [kx,ky] = meshgrid(-dk*Nn/2:dk:dk*Nn/2-dk,-dk*Nn/2:dk:dk*Nn/2-dk);
-else
-    oversampling = res/dx;  
-    dk=oversampling/(N/2);      
-    [kx,ky] = meshgrid(-dk*N/2:dk:dk*N/2-dk,-dk*N/2:dk:dk*N/2-dk);
-end
-
-kr=sqrt(kx.^2+ky.^2);
-pupil = (kr<1);
-
-%% load 2D PSF and OTF
+% load 2D PSF and OTF
+%-----------------------------------------------------
 load("PSF.mat")
 figure;imagesc(psf2D);colorbar;title('PSF 2D');
 otf2D = abs(fftn(psf2D,[N N]));
 figure;imagesc(otf2D);colorbar;title('OTF 2D');
 
-%% add aberration
-th = atan2(ky, kx);
-% Define the aberration coefficient
-W40 = 0.0 ;    
-W31 = 0.0 ;   
-W22 = 0.0 ;   
-rho = kr / max(kr(kr <= 1)); 
 
-phi_sph = 2*pi * W40 .* (6*rho.^4 - 6*rho.^2 + 1);
-phi_coma = 2*pi * W31 .* (3*rho.^3 - 2*rho) .* cos(th);
-phi_ast = 2*pi * W22 .* rho.^2 .* cos(2*th);
-
-phi_total = phi_sph + phi_coma + phi_ast;
-
-pupil_aberr = pupil .* exp(1i * phi_total);
-
-%% Calculate new psf
-psf2D_aberr = abs(fftshift(ifft2(pupil_aberr))).^2;
-psf2D_aberr = psf2D_aberr * N^2 / sum(abs(pupil_aberr(:)).^2);
-
-figure; imagesc(psf2D_aberr);
-colorbar; title('distorted PSF 2D');
-
-otf2D_aberr = abs(fftn(psf2D_aberr, [N N]));
-figure; imagesc(otf2D_aberr);
-colorbar; title('distorted OTF 2D');
-
-
-%% load original illumination patterns 
+% load original illumination patterns 
 %-----------------------------------------------------
 load("Original illumination.mat")
 P1 = P3;
 
-%% load distorted illumination patterns 
+% load distorted illumination patterns 
 %-----------------------------------------------------
 load("illumination with SA.mat") % load illumination with different aberration
 

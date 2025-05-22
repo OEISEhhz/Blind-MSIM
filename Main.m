@@ -7,11 +7,11 @@ Read_out_noise_on = 1;
 S = 15; 
 K = S^2;
 N=200;          
-pixelsize = 4;    
-magnification = 100; 
-dx=pixelsize/magnification;     % Sampling in lateral plane at the sample in um
-NA=1.45;         
-lambda=0.488;   % Wavelength in um
+% other parameters
+% pixelsize = 4;    
+% magnification = 100; 
+% NA=1.45;         
+% lambda=0.488;   % Wavelength in um
 
 % load 2D PSF and OTF
 %-----------------------------------------------------
